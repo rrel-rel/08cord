@@ -44,62 +44,61 @@ pub fn show(ui: &Ui, s: &Session, uis: &mut UiState, actions: &mut Vec<Action>) 
         return;
     };
     let mut close = false;
-    let modal = egui::Modal::new(egui::Id::unique("forward-message")).show(ui.ctx(), |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("forward-message")).frame(crate::ui::menu::frame()).show(ui.ctx(), |ui| {
         ui.set_width(460.0);
-        ui.label(RichText::new("Forward To").font(theme::font_bold(20.0)).color(theme::HEADER()));
-        ui.label(RichText::new(format!("Select where you want to share this message (up to {MAX_PICKS}).")).color(theme::MUTED()));
-        ui.add_space(8.0);
-        let search = ui.add(egui::TextEdit::singleline(&mut fwd.query).hint_text("Search").desired_width(f32::INFINITY));
-        if search.gained_focus() || ui.memory(|m| m.focused().is_none()) {
-            search.request_focus();
-        }
-        ui.add_space(6.0);
-        let scroll = egui::ScrollArea::vertical().max_height(300.0).auto_shrink([false, true]).show(ui, |ui| {
-            let list = destinations(state, guild, &fwd.query);
-            if list.is_empty() {
-                ui.label(RichText::new("No matches.").color(theme::MUTED()));
+        close |= crate::ui::menu::title(ui, "Forward To", None);
+        crate::ui::menu::page(ui, None, |ui| {
+            ui.label(RichText::new(format!("Select where you want to share this message (up to {MAX_PICKS}).")).color(theme::MUTED()));
+            ui.add_space(8.0);
+            let search = ui.add(egui::TextEdit::singleline(&mut fwd.query).hint_text("Search").desired_width(f32::INFINITY));
+            if search.gained_focus() || ui.memory(|m| m.focused().is_none()) {
+                search.request_focus();
             }
-            for c in list {
-                let picked = fwd.picked.contains(&c.id);
-                if destination_row(ui, state, c, picked).clicked() {
-                    if picked {
-                        fwd.picked.retain(|&p| p != c.id);
-                    } else if fwd.picked.len() < MAX_PICKS {
-                        fwd.picked.push(c.id);
+            ui.add_space(6.0);
+            let scroll = egui::ScrollArea::vertical().max_height(300.0).auto_shrink([false, true]).show(ui, |ui| {
+                let list = destinations(state, guild, &fwd.query);
+                if list.is_empty() {
+                    ui.label(RichText::new("No matches.").color(theme::MUTED()));
+                }
+                for c in list {
+                    let picked = fwd.picked.contains(&c.id);
+                    if destination_row(ui, state, c, picked).clicked() {
+                        if picked {
+                            fwd.picked.retain(|&p| p != c.id);
+                        } else if fwd.picked.len() < MAX_PICKS {
+                            fwd.picked.push(c.id);
+                        }
                     }
                 }
-            }
+            });
+            crate::ui::widgets::scrollbar(ui, &scroll);
+            ui.add_space(8.0);
+            // What's being forwarded.
+            egui::Frame::new().fill(theme::CHAT()).corner_radius(6).inner_margin(10).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let author = state.display_name(msg.author.id, state.channel(msg.channel_id).and_then(|c| c.guild_id));
+                ui.label(RichText::new(author).font(theme::font_semibold(13.0)).color(theme::HEADER()));
+                let text = if msg.content.is_empty() {
+                    match msg.attachments.len() {
+                        0 => "A message".to_owned(),
+                        1 => "1 attachment".to_owned(),
+                        n => format!("{n} attachments"),
+                    }
+                } else {
+                    crate::ui::markdown::plain_text(state, msg.content.lines().next().unwrap_or_default(), msg.guild_id)
+                };
+                ui.add(egui::Label::new(RichText::new(text).color(theme::TEXT())).truncate());
+            });
+            ui.add_space(8.0);
+            ui.add(egui::TextEdit::singleline(&mut fwd.note).hint_text("Add an optional message…").desired_width(f32::INFINITY));
         });
-        crate::ui::widgets::scrollbar(ui, &scroll);
-        ui.add_space(8.0);
-        // What's being forwarded.
-        egui::Frame::new().fill(theme::CHAT()).corner_radius(6).inner_margin(10).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let author = state.display_name(msg.author.id, state.channel(msg.channel_id).and_then(|c| c.guild_id));
-            ui.label(RichText::new(author).font(theme::font_semibold(13.0)).color(theme::HEADER()));
-            let text = if msg.content.is_empty() {
-                match msg.attachments.len() {
-                    0 => "A message".to_owned(),
-                    1 => "1 attachment".to_owned(),
-                    n => format!("{n} attachments"),
-                }
-            } else {
-                msg.content.lines().next().unwrap_or_default().to_owned()
-            };
-            ui.add(egui::Label::new(RichText::new(text).color(theme::TEXT())).truncate());
-        });
-        ui.add_space(8.0);
-        ui.add(egui::TextEdit::singleline(&mut fwd.note).hint_text("Add an optional message…").desired_width(f32::INFINITY));
-        ui.add_space(10.0);
-        // A fixed height: centring in all the height left would hold the dialog at its tallest as the list changes.
-        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = if fwd.picked.len() > 1 { format!("Send ({})", fwd.picked.len()) } else { "Send".to_owned() };
-            let send = egui::Button::new(RichText::new(label).color(Color32::WHITE)).min_size(Vec2::new(90.0, 32.0));
-            if ui.add_enabled(!fwd.picked.is_empty(), send).clicked() {
-                actions.push(Action::Forward { channel: fwd.channel, message: fwd.message, to: fwd.picked.clone(), note: fwd.note.trim().to_owned() });
+        crate::ui::menu::buttons(ui, |ui| {
+            if ui.add(crate::ui::menu::button("Cancel")).clicked() {
                 close = true;
             }
-            if ui.add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 32.0))).clicked() {
+            let label = if fwd.picked.len() > 1 { format!("Send ({})", fwd.picked.len()) } else { "Send".to_owned() };
+            if ui.add_enabled(!fwd.picked.is_empty(), crate::ui::menu::button(label)).clicked() {
+                actions.push(Action::Forward { channel: fwd.channel, message: fwd.message, to: fwd.picked.clone(), note: fwd.note.trim().to_owned() });
                 close = true;
             }
         });

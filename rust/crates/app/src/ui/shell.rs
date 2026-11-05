@@ -87,25 +87,28 @@ fn delete_prompt(ui: &Ui, s: &Session, uis: &mut UiState, actions: &mut Vec<Acti
     let guild = s.state.channel(channel).and_then(|c| c.guild_id);
     let perms = s.state.permissions(channel);
     let mut choice = None;
-    let modal = egui::Modal::new(egui::Id::unique("delete-message")).show(ui.ctx(), |ui| {
+    let modal = egui::Modal::new(egui::Id::unique("delete-message")).frame(crate::ui::menu::frame()).show(ui.ctx(), |ui| {
         ui.set_width(440.0);
-        ui.label(RichText::new("Delete Message").font(theme::font_bold(20.0)).color(theme::HEADER()));
-        ui.label(RichText::new("Are you sure you want to delete this message?").color(theme::MUTED()));
-        ui.add_space(8.0);
-        egui::Frame::new().fill(theme::CHAT()).corner_radius(6).inner_margin(egui::Margin { left: 0, right: 8, top: 0, bottom: 10 }).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let mut cx = crate::ui::message::Ctx { state: &s.state, uis: &mut *uis, actions: &mut *actions, channel, guild, perms, highlight: None, read_only: true };
-            crate::ui::message::show(ui, &msg, false, &mut cx);
+        if crate::ui::menu::title(ui, "Delete Message", None) {
+            choice = Some(false);
+        }
+        crate::ui::menu::page(ui, None, |ui| {
+            ui.label(RichText::new("Are you sure you want to delete this message?").color(theme::MUTED()));
+            ui.add_space(8.0);
+            egui::Frame::new().fill(theme::CHAT()).corner_radius(6).inner_margin(egui::Margin { left: 0, right: 8, top: 0, bottom: 10 }).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let mut cx = crate::ui::message::Ctx { state: &s.state, uis: &mut *uis, actions: &mut *actions, channel, guild, perms, highlight: None, read_only: true };
+                crate::ui::message::show(ui, &msg, false, &mut cx);
+            });
+            ui.add_space(6.0);
+            ui.label(RichText::new("Tip: hold Shift when deleting to skip this.").size(12.0).color(theme::FAINT()));
         });
-        ui.add_space(6.0);
-        ui.label(RichText::new("Tip: hold Shift when deleting to skip this.").size(12.0).color(theme::FAINT()));
-        ui.add_space(10.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(egui::Button::new(RichText::new("Delete").color(Color32::WHITE)).fill(theme::RED()).min_size(Vec2::new(90.0, 32.0))).clicked() {
-                choice = Some(true);
-            }
-            if ui.add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 32.0))).clicked() {
+        crate::ui::menu::buttons(ui, |ui| {
+            if ui.add(crate::ui::menu::button("Cancel")).clicked() {
                 choice = Some(false);
+            }
+            if ui.add(crate::ui::menu::button(RichText::new("Delete").color(Color32::WHITE)).fill(theme::RED())).clicked() {
+                choice = Some(true);
             }
         });
         if ui.input(|i| i.key_pressed(egui::Key::Enter)) {

@@ -243,6 +243,47 @@ fn mention(ui: &mut Ui, text: &str, size: f32) -> egui::Response {
     .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// A message's text as plain words on one line, for previews and notifications: mentions, roles, channels and
+/// custom emoji by name rather than their `<@123>` codes, and timestamps as times.
+pub fn plain_text(state: &swiftcord_core::state::State, content: &str, guild: Option<Snowflake>) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut rest = content;
+    while let Some(start) = rest.find('<') {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start..];
+        let Some(end) = tail.find('>') else {
+            out.push_str(tail);
+            rest = "";
+            break;
+        };
+        let inner = &tail[1..end];
+        let id = |s: &str| s.parse::<u64>().ok().map(Snowflake);
+        let named = if let Some(u) = inner.strip_prefix("@&").and_then(id) {
+            guild.and_then(|g| state.guild(g)).and_then(|g| g.roles.iter().find(|r| r.id == u)).map(|r| format!("@{}", r.name))
+        } else if let Some(u) = inner.strip_prefix("@!").or_else(|| inner.strip_prefix('@')).and_then(id) {
+            Some(format!("@{}", state.display_name(u, guild)))
+        } else if let Some(c) = inner.strip_prefix('#').and_then(id) {
+            Some(format!("#{}", state.channel(c).map_or_else(|| "unknown".to_owned(), |c| c.label())))
+        } else if inner.starts_with(':') || inner.starts_with("a:") {
+            inner.trim_start_matches('a').split(':').nth(1).map(|n| format!(":{n}:"))
+        } else if let Some(t) = inner.strip_prefix("t:") {
+            let (time, style) = t.split_once(':').map_or((t, 'f'), |(t, s)| (t, s.chars().next().unwrap_or('f')));
+            time.parse().ok().map(|t| format_timestamp(t, style))
+        } else if inner.starts_with("https://") || inner.starts_with("http://") {
+            Some(inner.to_owned())
+        } else {
+            None
+        };
+        match named {
+            Some(n) => out.push_str(&n),
+            None => out.push_str(&tail[..=end]),
+        }
+        rest = &tail[end + 1..];
+    }
+    out.push_str(rest);
+    out.replace('\n', " ")
+}
+
 pub fn format_timestamp(t: i64, style: char) -> String {
     let Some(dt) = Local.timestamp_opt(t, 0).single() else { return t.to_string() };
     match style {
@@ -268,4 +309,39 @@ fn relative(t: chrono::DateTime<chrono::Utc>) -> String {
     };
     let plural = if n == 1 { "" } else { "s" };
     if secs >= 0 { format!("{n} {unit}{plural} ago") } else { format!("in {n} {unit}{plural}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_knowing_bob() -> State {
+        let m: swiftcord_core::models::Message = serde_json::from_value(serde_json::json!({
+            "id": "5", "channel_id": "6", "content": "", "author": { "id": "1", "username": "alice" },
+            "mentions": [{ "id": "123", "username": "bob", "global_name": "Bob" }],
+        }))
+        .unwrap();
+        let mut state = State::default();
+        state.cache_author(&m);
+        state
+    }
+
+    #[test]
+    fn pings_read_as_names_not_ids() {
+        let state = state_knowing_bob();
+        assert_eq!(plain_text(&state, "hi <@123> and <@!123>", None), "hi @Bob and @Bob");
+        // Never the number, even for someone unheard of.
+        assert_eq!(plain_text(&state, "<@999>", None), "@Unknown User");
+    }
+
+    #[test]
+    fn other_codes_read_as_words() {
+        let state = state_knowing_bob();
+        assert_eq!(plain_text(&state, "<:blob:77> <a:spin:8> <https://x.com/a>", None), ":blob: :spin: https://x.com/a");
+        assert_eq!(plain_text(&state, "<#42>", None), "#unknown");
+        assert_eq!(plain_text(&state, "at <t:1700000000:D>", None), format!("at {}", format_timestamp(1700000000, 'D')));
+        // What only looks like a code is left alone.
+        assert_eq!(plain_text(&state, "1 < 2 > 0 and <3", None), "1 < 2 > 0 and <3");
+        assert_eq!(plain_text(&state, "two\nlines", None), "two lines");
+    }
 }

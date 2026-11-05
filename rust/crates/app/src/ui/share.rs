@@ -6,21 +6,19 @@ use swiftcord_voice::capture::Source;
 use crate::app::{Action, UiState};
 use crate::share_glue::{Quality, ShareStatus};
 use crate::theme::{self, icon};
-use crate::ui::widgets;
+use crate::ui::{menu, widgets};
 
 const RESOLUTIONS: [(u32, &str); 4] = [(480, "480p"), (720, "720p"), (1080, "1080p"), (0, "Source")];
 const FRAME_RATES: [u32; 3] = [15, 30, 60];
 
 pub fn picker(ui: &Ui, uis: &mut UiState, actions: &mut Vec<Action>) {
     let Some(p) = &mut uis.share_picker else { return };
-    let mut open = true;
-    egui::Window::new("Share Your Screen")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(440.0)
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .show(ui.ctx(), |ui| {
+    menu::window("Share Your Screen").anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ui.ctx(), |ui| {
+        ui.set_width(440.0);
+        if menu::title(ui, "Share Your Screen", None) {
+            actions.push(Action::CloseSharePicker);
+        }
+        menu::page(ui, None, |ui| {
             let scroll = egui::ScrollArea::vertical().max_height(320.0).auto_shrink([false, true]).show(ui, |ui| {
                 let mut heading = None;
                 for (i, s) in p.sources.iter().enumerate() {
@@ -75,21 +73,16 @@ pub fn picker(ui: &Ui, uis: &mut UiState, actions: &mut Vec<Action>) {
                         .color(theme::FAINT()),
                 );
             }
-
-            ui.add_space(6.0);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let go = ui.add_enabled(p.selected.is_some(), egui::Button::new(RichText::new("Go Live").color(Color32::WHITE)));
-                if go.clicked() {
-                    actions.push(Action::StartShare);
-                }
-                if ui.button("Cancel").clicked() {
-                    actions.push(Action::CloseSharePicker);
-                }
-            });
         });
-    if !open {
-        actions.push(Action::CloseSharePicker);
-    }
+        menu::buttons(ui, |ui| {
+            if ui.add(menu::button("Cancel")).clicked() {
+                actions.push(Action::CloseSharePicker);
+            }
+            if ui.add_enabled(p.selected.is_some(), menu::button("Go Live")).clicked() {
+                actions.push(Action::StartShare);
+            }
+        });
+    });
 }
 
 fn quality(ui: &mut Ui, q: &mut Quality) {

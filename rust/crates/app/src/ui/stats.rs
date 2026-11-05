@@ -131,32 +131,41 @@ pub fn show(ui: &Ui, uis: &mut UiState, actions: &mut Vec<Action>) {
     if !uis.stats_open {
         return;
     }
-    let mut open = true;
-    egui::Window::new("Connection Stats").open(&mut open).collapsible(false).resizable(false).default_width(420.0).show(ui.ctx(), |ui| {
-        if uis.stats.sections.is_empty() {
-            ui.add(egui::Spinner::new());
-        }
-        for (title, rows) in &uis.stats.sections {
-            ui.label(RichText::new(title.to_uppercase()).font(theme::font_semibold(12.0)).color(theme::MUTED()));
-            egui::Grid::new(("stats", title)).num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
-                for (name, value) in rows {
-                    ui.label(RichText::new(name).color(theme::MUTED()));
-                    ui.label(RichText::new(value).color(theme::TEXT()));
-                    ui.end_row();
-                }
-            });
-            ui.add_space(8.0);
-        }
-        if ui.button("Copy").clicked() {
-            let mut text = String::new();
-            for (title, rows) in &uis.stats.sections {
-                text.push_str(&format!("{title}\n"));
-                for (name, value) in rows {
-                    text.push_str(&format!("  {name}: {value}\n"));
-                }
+    let mut close = false;
+    crate::ui::menu::window("Connection Stats").show(ui.ctx(), |ui| {
+        ui.set_width(420.0);
+        close |= crate::ui::menu::title(ui, "Connection Stats", None);
+        crate::ui::menu::page(ui, None, |ui| {
+            if uis.stats.sections.is_empty() {
+                ui.add(egui::Spinner::new());
             }
-            actions.push(Action::Copy(text));
-        }
+            for (i, (title, rows)) in uis.stats.sections.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(8.0);
+                }
+                ui.label(RichText::new(title.to_uppercase()).font(theme::font_semibold(12.0)).color(theme::MUTED()));
+                egui::Grid::new(("stats", title)).num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
+                    for (name, value) in rows {
+                        ui.label(RichText::new(name).color(theme::MUTED()));
+                        ui.label(RichText::new(value).color(theme::TEXT()));
+                        ui.end_row();
+                    }
+                });
+            }
+        });
+        crate::ui::menu::buttons(ui, |ui| {
+            close |= ui.add(crate::ui::menu::button("Close")).clicked();
+            if ui.add(crate::ui::menu::button("Copy")).clicked() {
+                let mut text = String::new();
+                for (title, rows) in &uis.stats.sections {
+                    text.push_str(&format!("{title}\n"));
+                    for (name, value) in rows {
+                        text.push_str(&format!("  {name}: {value}\n"));
+                    }
+                }
+                actions.push(Action::Copy(text));
+            }
+        });
     });
-    uis.stats_open = open;
+    uis.stats_open = !close;
 }

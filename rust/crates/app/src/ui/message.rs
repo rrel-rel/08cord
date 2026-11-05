@@ -388,42 +388,6 @@ fn ask_delete(ui: &Ui, msg: &Message, cx: &mut Ctx) {
     }
 }
 
-/// A message's text for a one-line preview: mentions, roles, channels and custom emoji as their names rather
-/// than their `<@123>` codes, on one line.
-fn plain_preview(content: &str, cx: &Ctx) -> String {
-    let mut out = String::with_capacity(content.len());
-    let mut rest = content;
-    while let Some(start) = rest.find('<') {
-        out.push_str(&rest[..start]);
-        let tail = &rest[start..];
-        let Some(end) = tail.find('>') else {
-            out.push_str(tail);
-            rest = "";
-            break;
-        };
-        let inner = &tail[1..end];
-        let id = |s: &str| s.parse::<u64>().ok().map(Snowflake);
-        let named = if let Some(u) = inner.strip_prefix("@&").and_then(id) {
-            cx.guild.and_then(|g| cx.state.guild(g)).and_then(|g| g.roles.iter().find(|r| r.id == u)).map(|r| format!("@{}", r.name))
-        } else if let Some(u) = inner.strip_prefix("@!").or_else(|| inner.strip_prefix('@')).and_then(id) {
-            Some(format!("@{}", cx.state.display_name(u, cx.guild)))
-        } else if let Some(c) = inner.strip_prefix('#').and_then(id) {
-            Some(format!("#{}", cx.state.channel(c).map_or_else(|| "unknown".to_owned(), |c| c.label())))
-        } else if inner.starts_with(':') || inner.starts_with("a:") {
-            inner.trim_start_matches('a').split(':').nth(1).map(|n| format!(":{n}:"))
-        } else {
-            None
-        };
-        match named {
-            Some(n) => out.push_str(&n),
-            None => out.push_str(&tail[..=end]),
-        }
-        rest = &tail[end + 1..];
-    }
-    out.push_str(rest);
-    out.replace('\n', " ")
-}
-
 fn reply_preview(ui: &mut Ui, msg: &Message, cx: &mut Ctx) {
     ui.horizontal(|ui| {
         ui.add_space(GUTTER - 40.0);
@@ -442,7 +406,7 @@ fn reply_preview(ui: &mut Ui, msg: &Message, cx: &mut Ctx) {
                 widgets::member_avatar(ui, cx.state, &r.author, cx.guild, 16.0);
                 let color = cx.guild.and_then(|g| cx.state.role_color(g, r.author.id));
                 ui.label(RichText::new(cx.state.display_name(r.author.id, cx.guild)).font(theme::font_semibold(13.0)).color(theme::role_color(color)));
-                let preview: String = if r.content.is_empty() { "Click to see attachment".into() } else { plain_preview(&r.content, cx) };
+                let preview: String = if r.content.is_empty() { "Click to see attachment".into() } else { crate::ui::markdown::plain_text(cx.state, &r.content, cx.guild) };
                 let resp = ui.add(egui::Label::new(RichText::new(preview).size(13.0).color(theme::MUTED())).truncate().selectable(false).sense(Sense::click()));
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     cx.actions.push(Action::JumpTo { channel: cx.channel, message: Some(r.id) });

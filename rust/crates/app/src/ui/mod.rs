@@ -7,6 +7,7 @@ pub mod inbox;
 pub mod login;
 pub mod markdown;
 pub mod members;
+pub mod menu;
 pub mod message;
 pub mod rail;
 pub mod search;

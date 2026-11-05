@@ -1034,7 +1034,8 @@ impl App {
             }
             None => author,
         };
-        let mut body = m.content.chars().take(200).collect::<String>();
+        // As it reads, not as it's sent: a ping is `<@id>` in the message's text.
+        let mut body = crate::ui::markdown::plain_text(&s.state, &m.content, m.guild_id).chars().take(200).collect::<String>();
         if body.is_empty() && !m.attachments.is_empty() {
             body = format!("Sent {} attachment(s)", m.attachments.len());
         }
@@ -1928,7 +1929,9 @@ impl App {
                 let share_activity = self.session.as_ref().is_none_or(|s| s.state.shares_activity());
                 let launch_at_startup = platform::startup::enabled();
                 self.ui.settings_draft = Some(ui::settings::Draft {
+                    tab: Default::default(),
                     settings: self.settings.clone(),
+                    saved: self.settings.clone(),
                     inputs,
                     outputs,
                     cameras,

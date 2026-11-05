@@ -2,7 +2,7 @@
 //! server settings, moderation, and our own notification and privacy settings for that server.
 
 use chrono::Utc;
-use egui::{self, Color32, RichText, Ui, Vec2};
+use egui::{self, Color32, RichText, Ui};
 use serde_json::{json, Value};
 use swiftcord_core::models::ChannelType;
 use swiftcord_core::permissions::perm;
@@ -13,6 +13,7 @@ use swiftcord_core::Snowflake;
 use crate::app::{Action, Session, UiState};
 use crate::server_glue::ServerAction;
 use crate::theme;
+use crate::ui::menu;
 
 const INVITE_AGES: [(u32, &str); 7] = [(1800, "30 minutes"), (3600, "1 hour"), (21_600, "6 hours"), (43_200, "12 hours"), (86_400, "1 day"), (604_800, "7 days"), (0, "Never")];
 const INVITE_USES: [(u32, &str); 6] = [(0, "No limit"), (1, "1 use"), (5, "5 uses"), (10, "10 uses"), (25, "25 uses"), (100, "100 uses")];
@@ -133,12 +134,6 @@ fn choice<T: Copy + PartialEq>(ui: &mut Ui, id: &str, value: &mut T, options: &[
     });
 }
 
-fn title(ui: &mut Ui, text: &str, guild: &str) {
-    ui.label(RichText::new(text).font(theme::font_bold(20.0)).color(theme::HEADER()));
-    ui.add(egui::Label::new(RichText::new(guild).color(theme::MUTED())).truncate());
-    ui.add_space(8.0);
-}
-
 fn field(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
     ui.label(RichText::new(text.to_uppercase()).font(theme::font_semibold(12.0)).color(theme::MUTED()));
@@ -148,22 +143,25 @@ fn note(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).size(12.0).color(theme::FAINT()));
 }
 
-/// A row of buttons from the right. Its height is fixed: a layout centring in all the height left would hold the
-/// dialog at its tallest, and grow it whenever its contents do.
-fn button_row(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), egui::Layout::right_to_left(egui::Align::Center), add);
-}
-
 /// The usual bottom row: a primary button, and one that closes the dialog. Returns (primary clicked, close clicked).
 fn buttons(ui: &mut Ui, primary: &str, enabled: bool) -> (bool, bool) {
     let mut out = (false, false);
-    ui.add_space(10.0);
-    button_row(ui, |ui| {
-        let b = egui::Button::new(RichText::new(primary).color(Color32::WHITE)).min_size(Vec2::new(90.0, 32.0));
-        out.0 = ui.add_enabled(enabled, b).clicked();
-        out.1 = ui.add(egui::Button::new("Close").min_size(Vec2::new(80.0, 32.0))).clicked();
+    menu::buttons(ui, |ui| {
+        out.1 = ui.add(menu::button("Close")).clicked();
+        out.0 = ui.add_enabled(enabled, menu::button(primary)).clicked();
     });
     out
+}
+
+/// A dialog's page, with the outcome of what was last asked for at the bottom of it.
+fn body(ui: &mut Ui, tabs: Option<&menu::Tabs>, status: Option<&(bool, String)>, add: impl FnOnce(&mut Ui)) {
+    menu::page(ui, tabs, |ui| {
+        add(ui);
+        if let Some((ok, text)) = status {
+            ui.add_space(6.0);
+            ui.label(RichText::new(text).size(13.0).color(if *ok { theme::GREEN() } else { theme::RED() }));
+        }
+    });
 }
 
 pub fn show(ui: &Ui, s: &Session, uis: &mut UiState, actions: &mut Vec<Action>) {
@@ -176,11 +174,12 @@ pub fn show(ui: &Ui, s: &Session, uis: &mut UiState, actions: &mut Vec<Action>) 
     };
     let (status, busy) = (d.status.clone(), d.busy);
     let mut close = false;
-    let modal = egui::Modal::new(egui::Id::unique("server-dialog")).show(ui.ctx(), |ui| {
+    let status = status.as_ref();
+    let modal = egui::Modal::new(egui::Id::unique("server-dialog")).frame(menu::frame()).show(ui.ctx(), |ui| {
         ui.set_width(if matches!(d.kind, Kind::Moderation(_)) { 620.0 } else { 440.0 });
         match &mut d.kind {
             Kind::Invite { channel, max_age, max_uses, temporary, link } => {
-                title(ui, "Invite People", &name);
+                close |= menu::title(ui, "Invite People", Some(&name));
                 let channels: Vec<(Snowflake, String)> = state
                     .channel_tree(guild)
                     .into_iter()
@@ -188,65 +187,71 @@ pub fn show(ui: &Ui, s: &Session, uis: &mut UiState, actions: &mut Vec<Action>) 
                     .filter(|c| state.permissions(c.id) & perm::CREATE_INSTANT_INVITE != 0)
                     .map(|c| (c.id, c.label().to_string()))
                     .collect();
-                field(ui, "Invite to channel");
-                let options: Vec<(Option<Snowflake>, &str)> = channels.iter().map(|(id, n)| (Some(*id), n.as_str())).collect();
-                choice(ui, "invite-channel", channel, &options);
-                field(ui, "Expire after");
-                choice(ui, "invite-age", max_age, &INVITE_AGES);
-                field(ui, "Maximum uses");
-                choice(ui, "invite-uses", max_uses, &INVITE_USES);
-                ui.add_space(6.0);
-                ui.checkbox(temporary, "Temporary membership");
-                note(ui, "People who join with it are removed when they disconnect, unless given a role.");
-                if let Some(l) = link.as_ref() {
-                    field(ui, "Invite link");
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(l.as_str()).color(theme::LINK()));
-                        if ui.button("Copy").clicked() {
-                            actions.push(Action::Copy(l.clone()));
-                        }
-                    });
-                }
+                body(ui, None, status, |ui| {
+                    field(ui, "Invite to channel");
+                    let options: Vec<(Option<Snowflake>, &str)> = channels.iter().map(|(id, n)| (Some(*id), n.as_str())).collect();
+                    choice(ui, "invite-channel", channel, &options);
+                    field(ui, "Expire after");
+                    choice(ui, "invite-age", max_age, &INVITE_AGES);
+                    field(ui, "Maximum uses");
+                    choice(ui, "invite-uses", max_uses, &INVITE_USES);
+                    ui.add_space(6.0);
+                    ui.checkbox(temporary, "Temporary membership");
+                    note(ui, "People who join with it are removed when they disconnect, unless given a role.");
+                    if let Some(l) = link.as_ref() {
+                        field(ui, "Invite link");
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(l.as_str()).color(theme::LINK()));
+                            if ui.button("Copy").clicked() {
+                                actions.push(Action::Copy(l.clone()));
+                            }
+                        });
+                    }
+                });
                 let (go, closed) = buttons(ui, "Create Link", channel.is_some() && !busy);
-                close = closed;
+                close |= closed;
                 if let (true, Some(c)) = (go, *channel) {
                     actions.push(Action::Server(ServerAction::CreateInvite { channel: c, max_age: *max_age, max_uses: *max_uses, temporary: *temporary }));
                 }
             }
             Kind::Settings { name: new_name, description, verification, notifications, original } => {
-                title(ui, "Server Settings", &name);
-                field(ui, "Server name");
-                ui.add(egui::TextEdit::singleline(new_name).char_limit(100).desired_width(f32::INFINITY));
-                field(ui, "Description");
-                ui.add(egui::TextEdit::multiline(description).char_limit(300).desired_rows(3).desired_width(f32::INFINITY));
-                note(ui, "Discord only uses a description for Community servers.");
-                field(ui, "Verification level");
-                choice(ui, "server-verification", verification, &VERIFICATION);
-                field(ui, "Default notifications");
-                choice(ui, "server-notifications", notifications, &[(0, "All Messages"), (1, "Only @mentions")]);
+                close |= menu::title(ui, "Server Settings", Some(&name));
+                body(ui, None, status, |ui| {
+                    field(ui, "Server name");
+                    ui.add(egui::TextEdit::singleline(new_name).char_limit(100).desired_width(f32::INFINITY));
+                    field(ui, "Description");
+                    ui.add(egui::TextEdit::multiline(description).char_limit(300).desired_rows(3).desired_width(f32::INFINITY));
+                    note(ui, "Discord only uses a description for Community servers.");
+                    field(ui, "Verification level");
+                    choice(ui, "server-verification", verification, &VERIFICATION);
+                    field(ui, "Default notifications");
+                    choice(ui, "server-notifications", notifications, &[(0, "All Messages"), (1, "Only @mentions")]);
+                });
                 let change = original.as_ref().map(|o| settings_change(o, new_name, description, *verification, *notifications)).unwrap_or_default();
                 let valid = (2..=100).contains(&new_name.trim().chars().count());
                 let (go, closed) = buttons(ui, "Save Changes", valid && !change.is_empty() && !busy);
-                close = closed;
+                close |= closed;
                 if go {
                     actions.push(Action::Server(ServerAction::SaveGuild(guild, Value::Object(change))));
                 }
             }
             Kind::Notifications { level, suppress_everyone, suppress_roles, muted, mute_events, highlights, mobile_push } => {
-                title(ui, "Notification Settings", &name);
-                ui.checkbox(muted, "Mute this server");
-                field(ui, "Notify me about");
-                for (v, label) in NOTIFY {
-                    ui.radio_value(level, v, label);
-                }
-                ui.add_space(8.0);
-                ui.checkbox(suppress_everyone, "Suppress @everyone and @here");
-                ui.checkbox(suppress_roles, "Suppress all role @mentions");
-                ui.checkbox(highlights, "Show highlights");
-                ui.checkbox(mute_events, "Mute new events");
-                ui.checkbox(mobile_push, "Mobile push notifications");
+                close |= menu::title(ui, "Notification Settings", Some(&name));
+                body(ui, None, status, |ui| {
+                    ui.checkbox(muted, "Mute this server");
+                    field(ui, "Notify me about");
+                    for (v, label) in NOTIFY {
+                        ui.radio_value(level, v, label);
+                    }
+                    ui.add_space(8.0);
+                    ui.checkbox(suppress_everyone, "Suppress @everyone and @here");
+                    ui.checkbox(suppress_roles, "Suppress all role @mentions");
+                    ui.checkbox(highlights, "Show highlights");
+                    ui.checkbox(mute_events, "Mute new events");
+                    ui.checkbox(mobile_push, "Mobile push notifications");
+                });
                 let (go, closed) = buttons(ui, "Save Changes", !busy);
-                close = closed;
+                close |= closed;
                 if go {
                     let change = json!({
                         "muted": *muted,
@@ -263,43 +268,40 @@ pub fn show(ui: &Ui, s: &Session, uis: &mut UiState, actions: &mut Vec<Action>) 
                 }
             }
             Kind::Privacy { settings, dms, activity, joining } => {
-                title(ui, "Privacy Settings", &name);
-                if settings.is_none() {
-                    ui.add(egui::Spinner::new());
-                }
-                ui.add_enabled_ui(settings.is_some(), |ui| {
-                    ui.checkbox(dms, "Direct messages from server members");
-                    note(ui, "Lets people in this server message you without being your friend.");
-                    ui.add_space(6.0);
-                    ui.checkbox(activity, "Share my activity status here");
-                    note(ui, "Shows people in this server what you're playing or doing.");
-                    ui.add_space(6.0);
-                    ui.checkbox(joining, "Let people here join my activity");
+                close |= menu::title(ui, "Privacy Settings", Some(&name));
+                body(ui, None, status, |ui| {
+                    if settings.is_none() {
+                        ui.add(egui::Spinner::new());
+                    }
+                    ui.add_enabled_ui(settings.is_some(), |ui| {
+                        ui.checkbox(dms, "Direct messages from server members");
+                        note(ui, "Lets people in this server message you without being your friend.");
+                        ui.add_space(6.0);
+                        ui.checkbox(activity, "Share my activity status here");
+                        note(ui, "Shows people in this server what you're playing or doing.");
+                        ui.add_space(6.0);
+                        ui.checkbox(joining, "Let people here join my activity");
+                    });
                 });
                 let change = settings.as_ref().map(|o| privacy_change(o, guild, *dms, *activity, *joining)).unwrap_or_default();
                 let (go, closed) = buttons(ui, "Save Changes", !change.is_empty() && !busy);
-                close = closed;
+                close |= closed;
                 if go {
                     actions.push(Action::Server(ServerAction::SavePrivacy(Value::Object(change))));
                 }
             }
             Kind::Moderation(m) => {
-                title(ui, "Moderation", &name);
-                moderation(ui, state, guild, m, busy, actions);
-                // A confirmation has its own Cancel.
-                if m.confirm.is_none() {
-                    ui.add_space(8.0);
-                    button_row(ui, |ui| {
-                        close = ui.add(egui::Button::new("Close").min_size(Vec2::new(80.0, 32.0))).clicked();
-                    });
+                close |= menu::title(ui, "Moderation", Some(&name));
+                if let Some(act) = m.confirm.clone() {
+                    // What happened last says nothing about what's being confirmed now.
+                    let verb = confirm_page(ui, &act, m);
+                    confirm_buttons(ui, guild, &act, verb, m, busy, actions);
+                } else {
+                    let tabs = moderation_tabs(ui, state, guild, m, actions);
+                    body(ui, Some(&tabs), status, |ui| moderation(ui, state, guild, m, busy, actions));
+                    menu::buttons(ui, |ui| close |= ui.add(menu::button("Close")).clicked());
                 }
             }
-        }
-        // What happened last says nothing about what's being confirmed now.
-        let confirming = matches!(&d.kind, Kind::Moderation(m) if m.confirm.is_some());
-        if let Some((ok, text)) = status.as_ref().filter(|_| !confirming) {
-            ui.add_space(6.0);
-            ui.label(RichText::new(text).size(13.0).color(if *ok { theme::GREEN() } else { theme::RED() }));
         }
     });
     if close || modal.should_close() {
@@ -348,14 +350,14 @@ pub fn privacy_allowed(settings: &Value, key: &str, guild: Snowflake) -> bool {
     !settings[key].as_array().is_some_and(|l| l.iter().any(|v| v.as_str() == Some(id.as_str())))
 }
 
-fn moderation(ui: &mut Ui, state: &State, guild: Snowflake, m: &mut Moderation, busy: bool, actions: &mut Vec<Action>) {
-    let perms = state.guild_permissions(guild);
-    if let Some(act) = m.confirm.clone() {
-        let (verb, who, detail) = match &act {
-            ModAct::Kick(_, n) => ("Kick", n.clone(), "They can rejoin with a new invite.".to_owned()),
-            ModAct::Ban(_, n) => ("Ban", n.clone(), "They can't rejoin until unbanned.".to_owned()),
-            ModAct::Timeout(_, n, secs) => ("Time out", n.clone(), format!("They can't talk here for {}.", TIMEOUTS.iter().find(|t| t.0 == *secs).map_or("a while", |t| t.1))),
-        };
+/// Asks for a moderator's action to be confirmed. Returns what to call the button that does it.
+fn confirm_page(ui: &mut Ui, act: &ModAct, m: &mut Moderation) -> &'static str {
+    let (verb, who, detail) = match act {
+        ModAct::Kick(_, n) => ("Kick", n.clone(), "They can rejoin with a new invite.".to_owned()),
+        ModAct::Ban(_, n) => ("Ban", n.clone(), "They can't rejoin until unbanned.".to_owned()),
+        ModAct::Timeout(_, n, secs) => ("Time out", n.clone(), format!("They can't talk here for {}.", TIMEOUTS.iter().find(|t| t.0 == *secs).map_or("a while", |t| t.1))),
+    };
+    body(ui, None, None, |ui| {
         ui.label(RichText::new(format!("{verb} {who}?")).font(theme::font_bold(16.0)).color(theme::HEADER()));
         ui.label(RichText::new(detail).color(theme::MUTED()));
         field(ui, "Reason (shown in the audit log)");
@@ -364,39 +366,56 @@ fn moderation(ui: &mut Ui, state: &State, guild: Snowflake, m: &mut Moderation, 
             field(ui, "Delete their messages from");
             choice(ui, "ban-delete", &mut m.ban_delete, &BAN_DELETES);
         }
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!busy, egui::Button::new(RichText::new(verb).color(Color32::WHITE)).fill(theme::RED()).min_size(Vec2::new(90.0, 32.0))).clicked() {
-                let reason = m.reason.trim().to_owned();
-                let action = match &act {
-                    ModAct::Kick(u, n) => ServerAction::Kick { guild, user: *u, name: n.clone(), reason },
-                    ModAct::Ban(u, n) => ServerAction::Ban { guild, user: *u, name: n.clone(), delete_seconds: m.ban_delete, reason },
-                    ModAct::Timeout(u, n, secs) => ServerAction::Timeout { guild, user: *u, name: n.clone(), seconds: Some(*secs), reason },
-                };
-                actions.push(Action::Server(action));
-                m.confirm = None;
-                m.reason.clear();
-            }
-            if ui.add(egui::Button::new("Cancel").min_size(Vec2::new(80.0, 32.0))).clicked() {
-                m.confirm = None;
-            }
-        });
-        return;
-    }
-    ui.horizontal(|ui| {
-        if perms & (perm::KICK_MEMBERS | perm::BAN_MEMBERS | perm::MODERATE_MEMBERS) != 0 {
-            ui.selectable_value(&mut m.tab, ModTab::Members, "Members");
+    });
+    verb
+}
+
+fn confirm_buttons(ui: &mut Ui, guild: Snowflake, act: &ModAct, verb: &str, m: &mut Moderation, busy: bool, actions: &mut Vec<Action>) {
+    menu::buttons(ui, |ui| {
+        if ui.add(menu::button("Cancel")).clicked() {
+            m.confirm = None;
         }
-        if perms & perm::BAN_MEMBERS != 0 && ui.selectable_value(&mut m.tab, ModTab::Bans, "Bans").clicked() && m.bans.is_none() {
-            actions.push(Action::Server(ServerAction::LoadBans(guild)));
-        }
-        if perms & perm::VIEW_AUDIT_LOG != 0 && ui.selectable_value(&mut m.tab, ModTab::AuditLog, "Audit Log").clicked() && m.audit.is_none() {
-            actions.push(Action::Server(ServerAction::LoadAudit(guild)));
+        if ui.add_enabled(!busy, menu::button(RichText::new(verb).color(Color32::WHITE)).fill(theme::RED())).clicked() {
+            let reason = m.reason.trim().to_owned();
+            let action = match act {
+                ModAct::Kick(u, n) => ServerAction::Kick { guild, user: *u, name: n.clone(), reason },
+                ModAct::Ban(u, n) => ServerAction::Ban { guild, user: *u, name: n.clone(), delete_seconds: m.ban_delete, reason },
+                ModAct::Timeout(u, n, secs) => ServerAction::Timeout { guild, user: *u, name: n.clone(), seconds: Some(*secs), reason },
+            };
+            actions.push(Action::Server(action));
+            m.confirm = None;
+            m.reason.clear();
         }
     });
-    ui.separator();
+}
+
+/// The tabs we have permission for.
+fn moderation_tabs(ui: &mut Ui, state: &State, guild: Snowflake, m: &mut Moderation, actions: &mut Vec<Action>) -> menu::Tabs {
+    let perms = state.guild_permissions(guild);
+    let mut tabs = Vec::new();
+    if perms & (perm::KICK_MEMBERS | perm::BAN_MEMBERS | perm::MODERATE_MEMBERS) != 0 {
+        tabs.push((ModTab::Members, "Members"));
+    }
+    if perms & perm::BAN_MEMBERS != 0 {
+        tabs.push((ModTab::Bans, "Bans"));
+    }
+    if perms & perm::VIEW_AUDIT_LOG != 0 {
+        tabs.push((ModTab::AuditLog, "Audit Log"));
+    }
+    let tabs = menu::tabs(ui, &mut m.tab, &tabs);
+    // The audit log asks for itself when it's shown.
+    if tabs.changed && m.tab == ModTab::Bans && m.bans.is_none() {
+        actions.push(Action::Server(ServerAction::LoadBans(guild)));
+    }
+    tabs
+}
+
+fn moderation(ui: &mut Ui, state: &State, guild: Snowflake, m: &mut Moderation, busy: bool, actions: &mut Vec<Action>) {
+    let perms = state.guild_permissions(guild);
     // Short enough to leave the rest of the dialog on screen in a small window.
     let height = 360.0_f32.min(ui.ctx().content_rect().height() - 300.0).max(80.0);
+    // The same on every tab (the search box and the list), so changing tabs doesn't resize the dialog.
+    ui.set_min_height(height + 32.0);
     let scroll = egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]);
     match m.tab {
         ModTab::Members => {

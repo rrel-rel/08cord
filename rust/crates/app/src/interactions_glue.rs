@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use egui::{self, Align, Color32, Layout, RichText, Vec2};
+use egui::{self, Align, Layout, RichText, Vec2};
 use serde_json::value::RawValue;
 use swiftcord_core::interactions::{self, Field, Modal, Outcome};
 use swiftcord_core::models::{component_type as kind, Component, Message};
@@ -199,62 +199,60 @@ pub fn submit_modal(app: &mut App) {
 /// The form window.
 pub fn modal_window(ui: &egui::Ui, uis: &mut UiState, actions: &mut Vec<Action>) {
     let Some(m) = &mut uis.interactions.modal else { return };
-    let mut open = true;
-    egui::Window::new(m.modal.title.clone())
+    let title = m.modal.title.clone();
+    crate::ui::menu::window(title.clone())
         .id(egui::Id::unique("app-modal"))
-        .collapsible(false)
-        .resizable(false)
-        .open(&mut open)
         .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
         .show(ui.ctx(), |ui| {
             ui.set_width(440.0);
-            if !m.modal.application.name.is_empty() {
-                ui.label(RichText::new(&m.modal.application.name).size(12.5).color(theme::MUTED()));
+            let app = Some(m.modal.application.name.as_str()).filter(|n| !n.is_empty());
+            if crate::ui::menu::title(ui, &title, app) {
+                actions.push(Action::CloseModal);
             }
-            ui.add_enabled_ui(!m.busy, |ui| {
-                for f in &mut m.fields {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(f.label.to_uppercase()).font(theme::font_semibold(12.0)).color(theme::HEADER()));
-                        if f.required {
-                            ui.label(RichText::new("*").color(theme::RED()));
+            crate::ui::menu::page(ui, None, |ui| {
+                ui.add_enabled_ui(!m.busy, |ui| {
+                    for (i, f) in m.fields.iter_mut().enumerate() {
+                        if i == 0 {
+                            ui.add_space(-8.0);
                         }
-                    });
-                    if let Some(d) = &f.description {
-                        ui.label(RichText::new(d).size(12.0).color(theme::MUTED()));
-                    }
-                    if f.kind == kind::STRING_SELECT {
-                        modal_select(ui, f);
-                        continue;
-                    }
-                    let limit = f.max_length.unwrap_or(4000) as usize;
-                    let edit = if f.style == 2 { egui::TextEdit::multiline(&mut f.value).desired_rows(4) } else { egui::TextEdit::singleline(&mut f.value) };
-                    ui.add(edit.hint_text(f.placeholder.clone().unwrap_or_default()).char_limit(limit).desired_width(f32::INFINITY));
-                    if f.max_length.is_some() {
-                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                            ui.label(RichText::new(format!("{}/{limit}", f.value.chars().count())).size(11.0).color(theme::FAINT()));
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(f.label.to_uppercase()).font(theme::font_semibold(12.0)).color(theme::HEADER()));
+                            if f.required {
+                                ui.label(RichText::new("*").color(theme::RED()));
+                            }
                         });
+                        if let Some(d) = &f.description {
+                            ui.label(RichText::new(d).size(12.0).color(theme::MUTED()));
+                        }
+                        if f.kind == kind::STRING_SELECT {
+                            modal_select(ui, f);
+                            continue;
+                        }
+                        let limit = f.max_length.unwrap_or(4000) as usize;
+                        let edit = if f.style == 2 { egui::TextEdit::multiline(&mut f.value).desired_rows(4) } else { egui::TextEdit::singleline(&mut f.value) };
+                        ui.add(edit.hint_text(f.placeholder.clone().unwrap_or_default()).char_limit(limit).desired_width(f32::INFINITY));
+                        if f.max_length.is_some() {
+                            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                ui.label(RichText::new(format!("{}/{limit}", f.value.chars().count())).size(11.0).color(theme::FAINT()));
+                            });
+                        }
                     }
+                });
+                if let Some(e) = &m.error {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(e).color(theme::RED()));
                 }
             });
-            if let Some(e) = &m.error {
-                ui.add_space(6.0);
-                ui.label(RichText::new(e).color(theme::RED()));
-            }
-            ui.add_space(10.0);
-            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 30.0), Layout::right_to_left(Align::Center), |ui| {
-                let submit = egui::Button::new(RichText::new(if m.busy { "Sending…" } else { "Submit" }).color(Color32::WHITE));
-                if ui.add_enabled(!m.busy, submit).clicked() {
-                    actions.push(Action::SubmitModal);
-                }
-                if ui.button("Cancel").clicked() {
+            crate::ui::menu::buttons(ui, |ui| {
+                if ui.add(crate::ui::menu::button("Cancel")).clicked() {
                     actions.push(Action::CloseModal);
+                }
+                if ui.add_enabled(!m.busy, crate::ui::menu::button(if m.busy { "Sending…" } else { "Submit" })).clicked() {
+                    actions.push(Action::SubmitModal);
                 }
             });
         });
-    if !open {
-        actions.push(Action::CloseModal);
-    }
 }
 
 /// A select menu inside a form: checkboxes when several can be chosen, otherwise a list to pick one from.

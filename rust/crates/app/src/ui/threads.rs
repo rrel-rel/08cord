@@ -193,7 +193,7 @@ fn post_card(ui: &mut Ui, s: &Session, browser: Option<&crate::threads_glue::Bro
         }
         if let Some(m) = first {
             let author = s.state.display_name(m.author.id, forum.guild_id);
-            let text: String = m.content.lines().next().unwrap_or_default().chars().take(160).collect();
+            let text: String = crate::ui::markdown::plain_text(&s.state, m.content.lines().next().unwrap_or_default(), forum.guild_id).chars().take(160).collect();
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("{author}:")).font(theme::font_semibold(13.5)).color(theme::MUTED()));
                 ui.add(egui::Label::new(RichText::new(text).size(13.5).color(theme::MUTED())).truncate().selectable(false));
@@ -213,47 +213,39 @@ fn post_card(ui: &mut Ui, s: &Session, browser: Option<&crate::threads_glue::Bro
 /// The window for naming a new thread (or writing a new forum post).
 pub fn prompt(ui: &Ui, uis: &mut UiState, actions: &mut Vec<Action>) {
     let Some(p) = &mut uis.thread_prompt else { return };
-    let mut open = true;
     let title = if p.forum { "New Post" } else { "Start a Thread" };
-    egui::Window::new(title)
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(420.0)
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-        .show(ui.ctx(), |ui| {
+    crate::ui::menu::window(title).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ui.ctx(), |ui| {
+        ui.set_width(420.0);
+        let closed = crate::ui::menu::title(ui, title, None);
+        let mut submit = crate::ui::menu::page(ui, None, |ui| {
             ui.label(RichText::new(if p.forum { "POST TITLE" } else { "THREAD NAME" }).font(theme::font_semibold(12.0)).color(theme::MUTED()));
             let name = ui.add(egui::TextEdit::singleline(&mut p.name).char_limit(100).desired_width(f32::INFINITY).hint_text("New Thread"));
             if !name.has_focus() && p.name.is_empty() && p.content.is_empty() {
                 name.request_focus();
             }
-            let mut submit = name.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !p.forum;
             if p.forum {
                 ui.add_space(6.0);
                 ui.label(RichText::new("MESSAGE").font(theme::font_semibold(12.0)).color(theme::MUTED()));
                 ui.add(egui::TextEdit::multiline(&mut p.content).desired_rows(5).desired_width(f32::INFINITY));
             }
-            ui.add_space(8.0);
-            // A fixed-height row: a bare right-to-left layout would stretch to fill the window.
-            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), Layout::right_to_left(Align::Center), |ui| {
-                let ready = !p.name.trim().is_empty() && (!p.forum || !p.content.trim().is_empty()) && !p.busy;
-                let label = if p.forum { "Post" } else { "Create" };
-                let go = egui::Button::new(RichText::new(label).color(Color32::WHITE));
-                submit |= ui.add_enabled(ready, go).clicked();
-                if ui.button("Cancel").clicked() {
-                    actions.push(Action::CloseThreadPrompt);
-                }
-                if p.busy {
-                    ui.spinner();
-                }
-            });
-            if submit {
-                actions.push(Action::CreateThread);
-            }
+            name.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !p.forum
         });
-    if !open {
-        actions.push(Action::CloseThreadPrompt);
-    }
+        let cancelled = crate::ui::menu::buttons(ui, |ui| {
+            let cancelled = ui.add(crate::ui::menu::button("Cancel")).clicked();
+            let ready = !p.name.trim().is_empty() && (!p.forum || !p.content.trim().is_empty()) && !p.busy;
+            submit |= ui.add_enabled(ready, crate::ui::menu::button(if p.forum { "Post" } else { "Create" })).clicked();
+            if p.busy {
+                ui.spinner();
+            }
+            cancelled
+        });
+        if submit {
+            actions.push(Action::CreateThread);
+        }
+        if closed || cancelled {
+            actions.push(Action::CloseThreadPrompt);
+        }
+    });
 }
 
 /// Under a message that started a thread: its name, size and latest activity; opens it.
