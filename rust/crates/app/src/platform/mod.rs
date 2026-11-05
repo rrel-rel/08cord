@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod credentials;
 pub mod d3d11;
 pub mod discord_install;
+pub mod dissolve;
 pub mod inline_player;
 pub mod login_webview;
 pub mod single_instance;

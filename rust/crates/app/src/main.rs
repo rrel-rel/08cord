@@ -25,6 +25,7 @@ mod stream_glue;
 mod platform;
 mod player;
 mod theme;
+mod transition;
 mod ui;
 mod voice_glue;
 mod audio;

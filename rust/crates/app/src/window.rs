@@ -29,6 +29,8 @@ pub trait App {
 /// The app's window, for things that attach native windows to it.
 pub struct Frame {
     window: Arc<Window>,
+    /// What transition effect to use, and whether to start it.
+    pub transition: crate::transition::Request,
 }
 
 impl HasWindowHandle for Frame {
@@ -101,6 +103,7 @@ struct AppWindow {
     /// It was maximized when last closed: it is again when first shown.
     maximize: bool,
     modifiers: ModifiersState,
+    transition: crate::transition::Player,
 }
 
 impl ApplicationHandler<Instant> for Shell {
@@ -277,12 +280,13 @@ impl AppWindow {
             start_hidden: false,
             maximize,
             modifiers: ModifiersState::empty(),
+            transition: Default::default(),
         })
     }
 
     /// One frame: input in, the app's logic and UI, then drawing. Minimized or hidden, only the logic runs.
     fn frame(&mut self, ctx: &egui::Context, app: &mut dyn App) -> anyhow::Result<()> {
-        let mut frame = Frame { window: self.window.clone() };
+        let mut frame = Frame { window: self.window.clone(), transition: Default::default() };
         egui_winit::update_viewport_info(&mut self.info, ctx, &self.window, false);
         let mut input = self.egui_winit.take_egui_input(&self.window);
         input.viewports = std::iter::once((ViewportId::ROOT, self.info.clone())).collect();
@@ -312,7 +316,11 @@ impl AppWindow {
         let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
         let clear = ctx.global_style().visuals.panel_fill.to_normalized_gamma_f32();
         self.painter.resize([size.width, size.height])?;
-        let painted = self.painter.paint(output.pixels_per_point, clear, &primitives, &output.textures_delta);
+        let snapshots = self.transition.frame(frame.transition, Instant::now(), output.pixels_per_point, [size.width, size.height]);
+        let painted = self.painter.paint(output.pixels_per_point, clear, &primitives, &output.textures_delta, snapshots);
+        if self.transition.is_running() {
+            ctx.request_repaint();
+        }
         // Applied (or lost with the device); egui checks, in debug builds, that none were forgotten.
         output.textures_delta.clear();
         painted?;

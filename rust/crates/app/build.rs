@@ -24,18 +24,22 @@ fn compile_shaders() {
     use windows::Win32::Graphics::Direct3D::ID3DBlob;
     use windows::core::s;
 
-    const SOURCE: &str = "src/platform/egui.hlsl";
-    println!("cargo:rerun-if-changed={SOURCE}");
-    let hlsl = std::fs::read(SOURCE).expect("shader source");
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let blob_bytes = |b: &ID3DBlob| unsafe { std::slice::from_raw_parts(b.GetBufferPointer() as *const u8, b.GetBufferSize()).to_vec() };
-    for (entry, target, file) in [(s!("vs_main"), s!("vs_4_0"), "egui_vs.cso"), (s!("ps_main"), s!("ps_4_0"), "egui_ps.cso")] {
+    for (source, entry, target, file) in [
+        ("src/platform/egui.hlsl", s!("vs_main"), s!("vs_4_0"), "egui_vs.cso"),
+        ("src/platform/egui.hlsl", s!("ps_main"), s!("ps_4_0"), "egui_ps.cso"),
+        ("src/platform/dissolve.hlsl", s!("vs_main"), s!("vs_4_0"), "dissolve_vs.cso"),
+        ("src/platform/dissolve.hlsl", s!("ps_main"), s!("ps_4_0"), "dissolve_ps.cso"),
+    ] {
+        println!("cargo:rerun-if-changed={source}");
+        let hlsl = std::fs::read(source).expect("shader source");
         let (mut code, mut errors) = (None, None);
         let result = unsafe {
             D3DCompile(
                 hlsl.as_ptr().cast(),
                 hlsl.len(),
-                s!("egui.hlsl"),
+                None,
                 None,
                 None,
                 entry,

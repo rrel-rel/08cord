@@ -68,6 +68,15 @@ pub fn show(ui: &Ui, uis: &mut UiState, actions: &mut Vec<Action>) {
                     }
                 });
             });
+            ui.horizontal(|ui| {
+                ui.label("Transition effect");
+                egui::ComboBox::from_id_salt("Transition effect").width(240.0).selected_text(draft.settings.transition.name()).show_ui(ui, |ui| {
+                    for effect in crate::transition::Effect::ALL {
+                        ui.selectable_value(&mut draft.settings.transition, effect, effect.name());
+                    }
+                });
+            });
+            ui.label(RichText::new("Plays when you switch chats and dismiss menus.").small().color(theme::FAINT()));
             ui.add_space(12.0);
             ui.label(RichText::new("VOICE & AUDIO").font(theme::font_semibold(12.0)).color(theme::MUTED()));
             ui.add_space(4.0);

@@ -13,8 +13,20 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::core::{Interface, s};
 
+use super::dissolve::{Dissolve, Dissolver};
+
 const VERTEX_SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/egui_vs.cso"));
 const PIXEL_SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/egui_ps.cso"));
+
+/// What a frame needs for transition effects.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Snapshots {
+    /// None are chosen, so nothing's kept.
+    Off,
+    /// Nothing's running, but one could start next frame.
+    Keep,
+    Dissolve(Dissolve),
+}
 
 struct Texture {
     texture: ID3D11Texture2D,
@@ -74,6 +86,7 @@ pub struct Painter {
     indices: DynamicBuffer,
     samplers: HashMap<(TextureFilter, TextureFilter, TextureWrapMode), ID3D11SamplerState>,
     textures: HashMap<TextureId, Texture>,
+    dissolver: Option<Dissolver>,
 }
 
 impl Painter {
@@ -176,6 +189,7 @@ impl Painter {
             indices: DynamicBuffer::new(D3D11_BIND_INDEX_BUFFER),
             samplers: HashMap::new(),
             textures: HashMap::new(),
+            dissolver: None,
         };
         painter.create_target()?;
         Ok(painter)
@@ -202,6 +216,9 @@ impl Painter {
         }
         self.size = size;
         self.target = None;
+        if let Some(d) = &mut self.dissolver {
+            d.forget();
+        }
         unsafe {
             self.context.OMSetRenderTargets(None, None);
             self.swap_chain.ResizeBuffers(0, size[0], size[1], DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(0))?;
@@ -216,6 +233,7 @@ impl Painter {
         clear: [f32; 4],
         primitives: &[ClippedPrimitive],
         textures: &egui::TexturesDelta,
+        snapshots: Snapshots,
     ) -> windows::core::Result<()> {
         for (id, deltas) in &textures.set {
             for delta in deltas {
@@ -225,10 +243,28 @@ impl Painter {
             }
         }
         self.draw(pixels_per_point, clear, primitives)?;
+        self.end_frame(snapshots)?;
         for id in &textures.free {
             self.textures.remove(id);
         }
         unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() }
+    }
+
+    fn end_frame(&mut self, snapshots: Snapshots) -> windows::core::Result<()> {
+        let dissolve = match snapshots {
+            Snapshots::Off => {
+                self.dissolver = None;
+                return Ok(());
+            }
+            Snapshots::Keep => None,
+            Snapshots::Dissolve(d) => Some(d),
+        };
+        let Some(target) = self.target.clone() else { return Ok(()) };
+        if self.dissolver.is_none() {
+            self.dissolver = Some(Dissolver::new(&self.device)?);
+        }
+        let back: ID3D11Texture2D = unsafe { self.swap_chain.GetBuffer(0)? };
+        self.dissolver.as_mut().unwrap().end_frame(&self.device, &self.context, &back, &target, self.size, dissolve)
     }
 
     fn set_texture(&mut self, id: TextureId, delta: &ImageDelta) -> windows::core::Result<()> {

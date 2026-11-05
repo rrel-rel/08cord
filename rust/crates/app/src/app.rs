@@ -284,6 +284,8 @@ pub struct UiState {
     pub friend_search: String,
     /// The server dialog (invites, settings, moderation…), while open.
     pub server_dialog: Option<ui::server_menu::Dialog>,
+    /// Where the channel list and the chat were drawn this frame, if they were.
+    pub panes: Option<(egui::Rect, egui::Rect)>,
     /// The connection stats window.
     pub stats_open: bool,
     pub stats: ui::stats::Stats,
@@ -405,6 +407,7 @@ pub struct App {
     /// Images shown lately, so those that haven't been can be forgotten.
     images: std::sync::Arc<crate::image_cache::ImageCache>,
     images_checked: Instant,
+    transitions: crate::transition::Watcher,
     /// When the user last typed, clicked or moved the mouse.
     last_input: Instant,
     /// The mentions and window visibility last shown on the taskbar and tray badges.
@@ -448,6 +451,7 @@ impl App {
             perf: Default::default(),
             images,
             images_checked: Instant::now(),
+            transitions: Default::default(),
             last_input: Instant::now(),
             badge: None,
             away_since: None,
@@ -2091,6 +2095,7 @@ impl crate::window::App for App {
             self.jump_to_unread(step);
         }
         self.ui.web_player_slot = None;
+        self.ui.panes = None;
         let mut actions = Vec::new();
         if let Some(s) = &self.session {
             let key = (self.ui.guild, self.emoji.version, s.state.revision);
@@ -2106,9 +2111,14 @@ impl crate::window::App for App {
             self.ui.videos.output.clone_from(&self.settings.output_device);
             self.ui.videos.viewer(ui.ctx());
         }
+        // Before the actions: this frame is the first to show what the last frame's did.
+        let (guild, channel) = (self.ui.guild, self.ui.channel());
+        frame.transition.start(self.transitions.update(ui.ctx(), guild, channel, self.ui.panes));
         for a in actions {
             self.apply(a);
         }
+        // After them: saving a new effect plays it as the settings window closes.
+        frame.transition.effect = self.settings.transition;
         self.place_web_player(ui.ctx(), frame);
         ui::widgets::pointer_cursor(ui.ctx());
         // The visible channel's history may need fetching after a reconnect reset the cache.

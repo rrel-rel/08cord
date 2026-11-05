@@ -43,7 +43,7 @@ pub fn show(ui: &mut Ui, s: &Session, uis: &mut UiState, catalog: &mut emoji::Ca
     let sidebar = egui::Panel::left("sidebar").exact_size(240.0).resizable(false).show_separator_line(false).frame(egui::Frame::new().fill(theme::SIDEBAR())).show(ui, |ui| {
         sidebar::show(ui, s, uis, actions);
     });
-    egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::CHAT())).show(ui, |ui| {
+    let chat = egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::CHAT())).show(ui, |ui| {
         if uis.stream.as_ref().is_some_and(|v| v.visible) {
             crate::ui::stream::show(ui, s, uis, actions);
         } else {
@@ -51,6 +51,7 @@ pub fn show(ui: &mut Ui, s: &Session, uis: &mut UiState, catalog: &mut emoji::Ca
             chat::show(ui, s, uis, catalog, actions);
         }
     });
+    uis.panes = Some((sidebar.response.rect, chat.response.rect));
     // VGUI's light outlines between the panels, each in the first pixel column of the panel to its right (so
     // not over the sidebar's scrollbar), drawn after them so they stay on top.
     for r in [rail.response.rect, sidebar.response.rect] {

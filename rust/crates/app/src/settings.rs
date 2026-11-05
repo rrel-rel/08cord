@@ -44,6 +44,8 @@ pub struct Settings {
     pub rollover_volume: f32,
     /// The colour palette, by name (see `theme::names`).
     pub theme: String,
+    /// How the picture changes when switching chats and dismissing menus.
+    pub transition: crate::transition::Effect,
 }
 
 impl Default for Settings {
@@ -69,6 +71,7 @@ impl Default for Settings {
             click_volume: 1.0,
             rollover_volume: 1.0,
             theme: "Steam".into(),
+            transition: Default::default(),
         }
     }
 }
@@ -124,6 +127,14 @@ mod tests {
         assert_eq!((s.message_volume, s.call_volume, s.click_volume, s.rollover_volume), (0.5, 0.5, 0.25, 0.25));
         let s = Settings::parse(r#"{"sound_volume": 0.5}"#).unwrap();
         assert_eq!((s.message_volume, s.call_volume, s.click_volume, s.rollover_volume), (0.5, 0.5, 1.0, 1.0));
+    }
+
+    #[test]
+    fn a_transition_effect_is_kept_and_starts_off() {
+        use crate::transition::Effect;
+        assert_eq!(Settings::parse("{}").unwrap().transition, Effect::Off);
+        let saved = Settings { transition: Effect::Checkerboard, ..Settings::default() };
+        assert_eq!(Settings::parse(&serde_json::to_string(&saved).unwrap()).unwrap().transition, Effect::Checkerboard);
     }
 
     #[test]
